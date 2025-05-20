@@ -1,35 +1,48 @@
 import stripe from "stripe";
 import Booking from "../models/Booking.js";
 
-//API to handle Stripe Webhooks
-
+// API to handle Stripe Webhooks
 export const stripeWebhooks = async (request, response) => {
-    //stripe gateway initialize
+    // Stripe gateway initialization
     const stripeInstance = new stripe(process.env.STRIPE_SECRET_KEY);
     const sig = request.headers['stripe-signature'];
     let event;
 
     try {
-        event = stripeInstance.webhooks.constructEvent(request.body, sig, process.env.STRIPE_WEBHOOK_SECRET)
+        event = stripeInstance.webhooks.constructEvent(request.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
     } catch (err) {
-        response.status(400).send(`Webhook Error: ${err.message}`)
+        return response.status(400).send(`Webhook Error: ${err.message}`); // Return here
     }
 
-    //handle the event
-    if (event.type === "payment_intent_succeeded") {
+    // Handle the event
+    if (event.type === "payment_intent.succeeded") { // Use the correct event type
         const paymentIntent = event.data.object;
         const paymentIntentId = paymentIntent.id;
 
-        //getting session metadata
+        // Getting session metadata
         const session = await stripeInstance.checkout.sessions.list({
             payment_intent: paymentIntentId,
         });
 
-        const { bookingId } = session.data[0].metadata;
-        //mark payment as paid
-        await Booking.findByIdAndUpdate(bookingId, {isPaid: true, paymentMethod: "Stripe"})
+        // Check if session data is not empty
+        if (session.data.length > 0) {
+            const { bookingId } = session.data[0].metadata;
+
+            // Mark payment as paid
+            try {
+                await Booking.findByIdAndUpdate(bookingId, { isPaid: true, paymentMethod: "Stripe" });
+                console.log(`Booking ${bookingId} updated successfully.`);
+            } catch (error) {
+                console.error("Error updating booking:", error);
+            }
+        } else {
+            console.log("No session data found for payment intent:", paymentIntentId);
+        }
     } else {
-        console.log("Unhandled event type :", event.type)
+        console.log("Unhandled event type:", event.type);
     }
+
     response.json({ received: true });
-}
+};
+
+
